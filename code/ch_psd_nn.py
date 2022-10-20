@@ -6,12 +6,12 @@ import scipy as sp
 from scipy.io import loadmat
 import numpy as np
 import sklearn as sk
-from sklearn.model_selection import GridSearchCV, train_test_split
-from sklearn.model_selection import LeaveOneOut
+from sklearn.model_selection import GridSearchCV, train_test_split, LeaveOneOut
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
 from sklearn.metrics import balanced_accuracy_score as bas, plot_confusion_matrix
 from sklearn.metrics import confusion_matrix as cm
 from sklearn.metrics import ConfusionMatrixDisplay as cm_display
+from sklearn.metrics import f1_score
 from imblearn.over_sampling import SMOTE
 from joblib import Parallel, delayed
 import matplotlib.pyplot as plt
@@ -36,8 +36,9 @@ y_true = np.expand_dims(np.array([True]*len(label_increase)+[False]*len(label_no
 f_feat = np.arange(3,8)
 f_idx = np.array([i for i,x in enumerate(freqs) if x in f_feat])
 # select feature channels
-ch_feat = ['FZ', 'FCZ', 'CZ']
-ch_idx = np.array([i for i,x in enumerate(chan30) if x in ch_feat])
+# ch_feat = ['FZ', 'FCZ', 'CZ']
+# ch_idx = np.array([i for i,x in enumerate(chan30) if x in ch_feat])
+ch_idx = np.arange(30)
 def select_feat(ch_psd_lib, f_idx, ch_idx):
     feat_lib = np.hstack([x[np.ix_(ch_idx,f_idx)].reshape(-1,1) for x in ch_psd_lib])
     return feat_lib.T
@@ -51,11 +52,11 @@ class simple_nn(nn.Module):
         super(simple_nn, self).__init__()
         self.flatten = nn.Flatten()
         self.nn_struct = nn.Sequential(
-            nn.Linear(15, 15),
+            nn.Linear(150, 50),
             nn.ReLU(),
-            nn.Linear(15, 5),
+            nn.Linear(50, 10),
             nn.ReLU(),
-            nn.Linear(5,1),
+            nn.Linear(10,1),
             nn.Sigmoid()
         )
         nn.init.kaiming_normal_(self.nn_struct[0].weight.data,nonlinearity='relu')
@@ -99,7 +100,7 @@ def test(X, y, model, loss_fn):
 #%% Train model without SMOTE
 # LOO
 loo = LeaveOneOut()
-epochs = 2000
+epochs = 1000
 train_acc = []
 train_loss = []
 train_bas = []
@@ -127,6 +128,7 @@ for i,(train_idx, test_idx) in enumerate(loo.split(feat_lib)):
 
 print(f"LOO Acc. = {np.mean(test_acc)*100:.2f}%")
 print(f"LOO Balanced Acc. = {bas(y_true,pred)*100:.2f}%")
+print(f"LOO F1 score = {f1_score(y_true,pred):.2f}")
 cm_display.from_predictions(y_true,pred,normalize=None,display_labels=['Normal','Increase'])
 fig, ax = plt.subplots(3,1,figsize=(10,10))
 ax[0].plot(train_acc)
@@ -199,7 +201,7 @@ X_resampled, y_resampled = SMOTE().fit_resample(split_train_X, split_train_y)
 X_resampled = torch.tensor(X_resampled,dtype=torch.float)
 y_resampled = torch.tensor(np.expand_dims(y_resampled,axis = 1),dtype=torch.float)
 # train model
-epochs = 1000
+epochs = 500
 train_acc = []
 train_loss = []
 train_bas = []
@@ -232,7 +234,7 @@ plt.show()
 #%% LOO with SMOTE on each training data
 # LOO
 loo = LeaveOneOut()
-epochs = 2000
+epochs = 1000
 train_acc = []
 train_loss = []
 train_bas = []
@@ -265,6 +267,7 @@ for i,(train_idx, test_idx) in enumerate(loo.split(feat_lib)):
 
 print(f"LOO Acc. = {np.mean(test_acc)*100:.2f}%")
 print(f"LOO Balanced Acc. = {bas(y_true,pred)*100:.2f}%")
+print(f"LOO F1 score = {f1_score(y_true,pred):.2f}")
 cm_display.from_predictions(y_true,pred,normalize=None,display_labels=['Normal','Increase'])
 fig, ax = plt.subplots(3,1,figsize=(10,10))
 ax[0].plot(train_acc)
