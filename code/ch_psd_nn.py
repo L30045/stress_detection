@@ -23,7 +23,7 @@ import torch.optim as optim
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 #%% load data
-filename = 'ch_power.mat'
+filename = 'ch_power_proj_11Ch.mat'
 filepath = os.path.join('../data/classroom', filename)
 psd_data = loadmat(filepath)
 ch_psd_lib = psd_data['ch_psd_lib'][0]
@@ -34,25 +34,29 @@ label_normal = psd_data['label_normal']
 sess_list = psd_data['sess_list'].T
 y_true = np.expand_dims(np.array([True]*len(label_increase)+[False]*len(label_normal)),1)
 f_feat = np.arange(3,8)
+# f_feat = np.arange(1,51)
 f_idx = np.array([i for i,x in enumerate(freqs) if x in f_feat])
 # select feature channels
 # ch_feat = ['FZ', 'FCZ', 'CZ']
 # ch_idx = np.array([i for i,x in enumerate(chan30) if x in ch_feat])
 ch_idx = np.arange(30)
+
 def select_feat(ch_psd_lib, f_idx, ch_idx):
     feat_lib = np.hstack([x[np.ix_(ch_idx,f_idx)].reshape(-1,1) for x in ch_psd_lib])
     return feat_lib.T
 feat_lib = select_feat(ch_psd_lib,f_idx,ch_idx)
+feat_lib = feat_lib[:,np.sum(feat_lib,axis=0)!=0]
 feat_lib = torch.tensor(feat_lib,dtype=torch.float)
 y_true = torch.tensor(y_true,dtype=torch.float)
 
 #%% define model
+# TO DO LIST: Reduce layers. Make a better slides
 class simple_nn(nn.Module):
     def __init__(self) -> None:
         super(simple_nn, self).__init__()
         self.flatten = nn.Flatten()
         self.nn_struct = nn.Sequential(
-            nn.Linear(150, 50),
+            nn.Linear(55, 50),
             nn.ReLU(),
             nn.Linear(50, 10),
             nn.ReLU(),
@@ -100,7 +104,7 @@ def test(X, y, model, loss_fn):
 #%% Train model without SMOTE
 # LOO
 loo = LeaveOneOut()
-epochs = 1000
+epochs = 500
 train_acc = []
 train_loss = []
 train_bas = []
@@ -277,4 +281,63 @@ ax[1].set_title('Train Balanced Accuracy')
 ax[2].plot(np.log(train_loss))
 ax[2].set_title('Train Loss')
 plt.show()
-# %%
+
+#%% Find out when to early stop
+n_split_test = 5
+np.random.seed(1)
+inc_data = feat_lib[y_true.reshape(-1)==1,:]
+norm_data = feat_lib[y_true.reshape(-1)==0,:]
+split_idx = np.random.permutation(inc_data.shape[0])
+split_test_inc, split_train_inc = inc_data[split_idx[:n_split_test],:], inc_data[split_idx[n_split_test:],:]
+split_idx = np.random.permutation(norm_data.shape[0])
+split_test_norm, split_train_norm = norm_data[split_idx[:n_split_test],:], norm_data[split_idx[n_split_test:],:]
+split_test_X = np.vstack([split_test_inc, split_test_norm])
+split_test_X = torch.tensor(split_test_X, dtype=torch.float)
+split_train_X = np.vstack([split_train_inc, split_train_norm])
+split_train_y = np.vstack([np.ones((split_train_inc.shape[0],1)), np.zeros((split_train_norm.shape[0],1))])
+split_test_y = np.vstack([np.ones((split_test_inc.shape[0],1)), np.zeros((split_test_norm.shape[0],1))])
+X_resampled, y_resampled = SMOTE().fit_resample(split_train_X, split_train_y)
+X_resampled = torch.tensor(X_resampled,dtype=torch.float)
+y_resampled = torch.tensor(np.expand_dims(y_resampled,axis = 1),dtype=torch.float)
+# train model
+epochs = 1000
+train_acc = []
+train_loss = []
+train_bas = []
+test_acc = []
+test_bas = []
+test_loss = []
+torch.manual_seed(0)
+torch.cuda.manual_seed_all(0)
+model = simple_nn().to(device)
+optimizer = optim.Adam(model.parameters(),lr=1e-3,weight_decay=1e-3)
+for t in range(epochs):
+    acc, loss = train(X_resampled, y_resampled, model, loss_fn, optimizer)
+    train_acc.append(acc)
+    train_loss.append(loss)
+    model.eval()
+    train_pred = model(X_resampled).detach().numpy().round()
+    train_bas.append(bas(train_pred,y_resampled.reshape(-1).detach().numpy()))
+    test_pred = model(split_test_X)
+    pred = test_pred.detach().numpy().round()
+    test_acc.append(np.mean(pred == split_test_y))
+    test_bas.append(bas(pred,split_test_y))
+    test_loss.append(loss_fn(test_pred, torch.tensor(split_test_y,dtype=torch.float)).item())
+# print(f"LOO Acc. = {np.mean(test_acc)*100:.2f}%")
+# print(f"LOO Balanced Acc. = {bas(split_test_y,pred)*100:.2f}%")
+# cm_display.from_predictions(split_test_y,pred,normalize=None,display_labels=['Normal','Increase'])
+fig, ax = plt.subplots(3,2,figsize=(10,10))
+ax[0][0].plot(train_acc)
+ax[0][0].set_title('Train Accuracy')
+ax[1][0].plot(train_bas)
+ax[1][0].set_title('Train Balanced Accuracy')
+ax[2][0].plot(train_loss)
+ax[2][0].set_title('Train Loss')
+ax[0][1].plot(test_acc)
+ax[0][1].set_title('Test Accuracy')
+ax[1][1].plot(test_bas)
+ax[1][1].set_title('Test Balanced Accuracy')
+ax[2][1].plot(test_loss)
+ax[2][1].set_title('Test Loss')
+plt.show()
+print(f"Lowest test loss happens at {np.argmin(test_loss)} epochs.")
