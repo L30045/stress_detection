@@ -23,7 +23,7 @@ import torch.optim as optim
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 #%% load data
-filename = 'ch_power_proj_11Ch.mat'
+filename = 'ch_power.mat'
 filepath = os.path.join('../data/classroom', filename)
 psd_data = loadmat(filepath)
 ch_psd_lib = psd_data['ch_psd_lib'][0]
@@ -34,18 +34,15 @@ label_normal = psd_data['label_normal']
 sess_list = psd_data['sess_list'].T
 y_true = np.expand_dims(np.array([True]*len(label_increase)+[False]*len(label_normal)),1)
 f_feat = np.arange(3,8)
-# f_feat = np.arange(1,51)
 f_idx = np.array([i for i,x in enumerate(freqs) if x in f_feat])
 # select feature channels
-# ch_feat = ['FZ', 'FCZ', 'CZ']
-# ch_idx = np.array([i for i,x in enumerate(chan30) if x in ch_feat])
-ch_idx = np.arange(30)
-
+ch_feat = ['FZ', 'FCZ', 'CZ']
+ch_idx = np.array([i for i,x in enumerate(chan30) if x in ch_feat])
+# ch_idx = np.arange(30)
 def select_feat(ch_psd_lib, f_idx, ch_idx):
     feat_lib = np.hstack([x[np.ix_(ch_idx,f_idx)].reshape(-1,1) for x in ch_psd_lib])
     return feat_lib.T
 feat_lib = select_feat(ch_psd_lib,f_idx,ch_idx)
-feat_lib = feat_lib[:,np.sum(feat_lib,axis=0)!=0]
 feat_lib = torch.tensor(feat_lib,dtype=torch.float)
 y_true = torch.tensor(y_true,dtype=torch.float)
 
@@ -56,11 +53,11 @@ class simple_nn(nn.Module):
         super(simple_nn, self).__init__()
         self.flatten = nn.Flatten()
         self.nn_struct = nn.Sequential(
-            nn.Linear(55, 50),
+            nn.Linear(15, 10),
             nn.ReLU(),
-            nn.Linear(50, 10),
+            nn.Linear(10, 5),
             nn.ReLU(),
-            nn.Linear(10,1),
+            nn.Linear(5,1),
             nn.Sigmoid()
         )
         nn.init.kaiming_normal_(self.nn_struct[0].weight.data,nonlinearity='relu')
@@ -104,7 +101,7 @@ def test(X, y, model, loss_fn):
 #%% Train model without SMOTE
 # LOO
 loo = LeaveOneOut()
-epochs = 500
+epochs = 1000
 train_acc = []
 train_loss = []
 train_bas = []
